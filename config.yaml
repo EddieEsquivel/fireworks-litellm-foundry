@@ -1,0 +1,40 @@
+# No customer endpoints, credentials, or deployment IDs belong in this file.
+# setup.py/runtime.py derive the provider-prefixed model values at runtime.
+model_list:
+  - model_name: claude-sonnet-foundry
+    litellm_params:
+      model: os.environ/LITELLM_SONNET_MODEL
+      api_base: os.environ/FOUNDRY_API_BASE
+      api_key: os.environ/FOUNDRY_API_KEY
+  - model_name: claude-opus-foundry
+    litellm_params:
+      model: os.environ/LITELLM_OPUS_MODEL
+      api_base: os.environ/FOUNDRY_API_BASE
+      api_key: os.environ/FOUNDRY_API_KEY
+  - model_name: claude-haiku-foundry
+    litellm_params:
+      model: os.environ/LITELLM_HAIKU_MODEL
+      api_base: os.environ/FOUNDRY_API_BASE
+      api_key: os.environ/FOUNDRY_API_KEY
+
+  # Claude Desktop may request built-in IDs for background work. Match the
+  # Claude namespace only, not unrelated model IDs. The upstream deployment is
+  # fixed by the local environment, never inferred from the requested model ID.
+  - model_name: "claude-*"
+    litellm_params:
+      model: os.environ/LITELLM_SONNET_MODEL
+      api_base: os.environ/FOUNDRY_API_BASE
+      api_key: os.environ/FOUNDRY_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+litellm_settings:
+  # Do not silently discard unsupported request parameters.
+  drop_params: false
+  # Do not attach prompt/response bodies to LiteLLM logging callbacks.
+  turn_off_message_logging: true
+  # Compatibility hook: strips reasoning/thinking fields from replayed assistant
+  # history before requests reach Foundry's OpenAI-compatible surface, which
+  # rejects them on tool-result turns. See reasoning_history_hook.py for detail.
+  callbacks: reasoning_history_hook.proxy_handler_instance

@@ -1,0 +1,2 @@
+# Direct dependency pinned; transitive dependencies are not hash-locked.
+litellm[proxy]==1.106.4

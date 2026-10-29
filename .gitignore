@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+.venv/
+.local/
+__pycache__/
+*.py[cod]
+*.log
+.DS_Store
+.coverage
