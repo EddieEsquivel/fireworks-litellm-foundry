@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
 """Exercise the proxy's Anthropic API; upstream inference is billable."""
 
 import argparse

@@ -1,5 +1,5 @@
 # No customer endpoints, credentials, or deployment IDs belong in this file.
-# setup.py/runtime.py derive the provider-prefixed model values at runtime.
+# bootstrap.py/runtime.py derive the provider-prefixed model values at runtime.
 model_list:
   - model_name: claude-sonnet-foundry
     litellm_params:

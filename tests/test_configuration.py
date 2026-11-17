@@ -10,8 +10,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import bootstrap
 import runtime
-import setup
 import smoke_test
 
 
@@ -133,6 +133,22 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual((Path(directory) / ".local/claude-config/settings.json").read_text(), "{}\n")
             self.assertEqual(os.environ["ANTHROPIC_API_KEY"], "competing")
 
+    def test_claude_environment_drops_uv_script_env_only(self):
+        script_env = "/cache/uv/environments-v2/runtime-0000"
+        uv_vars = {"UV_RUN_RECURSION_DEPTH": "1", "UV": "/bin/uv", "VIRTUAL_ENV": script_env,
+                   "PATH": os.pathsep.join([script_env + "/bin", "/usr/bin"])}
+        with tempfile.TemporaryDirectory() as directory, patch.object(runtime, "ROOT", Path(directory)):
+            with patch.dict(os.environ, uv_vars, clear=True):
+                client = runtime.claude_environment(sample_values())
+            self.assertNotIn("VIRTUAL_ENV", client)
+            self.assertNotIn("UV_RUN_RECURSION_DEPTH", client)
+            self.assertEqual(client["PATH"], "/usr/bin")
+            # A virtualenv the user activated themselves is left alone.
+            with patch.dict(os.environ, {"VIRTUAL_ENV": "/own/venv", "PATH": "/own/venv/bin"}, clear=True):
+                client = runtime.claude_environment(sample_values())
+            self.assertEqual(client["VIRTUAL_ENV"], "/own/venv")
+            self.assertEqual(client["PATH"], "/own/venv/bin")
+
     def test_claude_launcher_preserves_local_settings(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(runtime, "ROOT", Path(directory)):
             settings = Path(directory) / ".local/claude-config/settings.json"
@@ -142,27 +158,27 @@ class ConfigurationTests(unittest.TestCase):
             runtime.claude_environment(sample_values())
             self.assertEqual(settings.read_text(), original)
 
-    def test_setup_generates_and_retains_key(self):
+    def test_bootstrap_generates_and_retains_key(self):
         values = sample_values()
         values["LITELLM_MASTER_KEY"] = ""
-        with patch.object(setup, "read_env", return_value=values), patch.dict(os.environ, {}, clear=True):
-            result = setup.collect_values(True)
+        with patch.object(bootstrap, "read_env", return_value=values), patch.dict(os.environ, {}, clear=True):
+            result = bootstrap.collect_values(True)
         self.assertTrue(result["LITELLM_MASTER_KEY"].startswith("sk-"))
         self.assertGreaterEqual(len(result["LITELLM_MASTER_KEY"]), 35)
-        with patch.object(setup, "read_env", return_value=result), patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(setup.collect_values(True)["LITELLM_MASTER_KEY"], result["LITELLM_MASTER_KEY"])
+        with patch.object(bootstrap, "read_env", return_value=result), patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(bootstrap.collect_values(True)["LITELLM_MASTER_KEY"], result["LITELLM_MASTER_KEY"])
 
     def test_configure_only_does_not_install_or_print_secrets(self):
         values = sample_values()
-        with tempfile.TemporaryDirectory() as directory, patch.object(setup, "ENV_FILE", Path(directory) / ".env"), \
-                patch.object(setup, "collect_values", return_value=values), \
-                patch.object(setup, "install_nexus") as nexus, patch.object(setup, "install_litellm") as litellm, \
-                patch("sys.argv", ["setup.py", "--non-interactive", "--configure-only"]):
+        with tempfile.TemporaryDirectory() as directory, patch.object(bootstrap, "ENV_FILE", Path(directory) / ".env"), \
+                patch.object(bootstrap, "collect_values", return_value=values), \
+                patch.object(bootstrap, "install_nexus") as nexus, patch.object(bootstrap, "install_litellm") as litellm, \
+                patch("sys.argv", ["bootstrap.py", "--non-interactive", "--configure-only"]):
             output = io.StringIO()
             old_mask = os.umask(0o077)
             try:
                 with contextlib.redirect_stdout(output):
-                    self.assertEqual(setup.main(), 0)
+                    self.assertEqual(bootstrap.main(), 0)
             finally:
                 os.umask(old_mask)
             nexus.assert_not_called()

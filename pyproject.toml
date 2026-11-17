@@ -1,0 +1,12 @@
+[project]
+name = "fireworks-litellm-foundry"
+version = "0.1.0"
+description = "Local LiteLLM proxy connecting Claude Code to Fireworks deployments in Microsoft Foundry"
+readme = "README.md"
+requires-python = ">=3.11"
+# The only third-party dependency. uv.lock pins and hash-locks the full set.
+dependencies = ["litellm[proxy]==1.106.4"]
+
+[tool.uv]
+# Scripts, not an installable package: never build or install this project.
+package = false
