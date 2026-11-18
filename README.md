@@ -20,7 +20,7 @@ Use macOS or Linux. Windows users can run the scripts and Claude Code in WSL; na
 
 Install:
 
-- Python **3.11+**, with `venv` and `pip` (on some Linux distributions these are separate OS packages).
+- [uv](https://docs.astral.sh/uv/getting-started/installation/). It provides the Python interpreter (3.12, from `.python-version`) and installs the locked dependencies; you don't need a system Python. Without uv, see [Installing without uv](bootstrap.README.md#installing-without-uv).
 - Node.js **22+**, npm, and Git, for the repo-local Nexus installation.
 - [Claude Code](https://code.claude.com/docs/en/setup), installed separately and available as `claude` on your PATH.
 - Optional: a Claude Desktop build with third-party inference settings enabled. An organization policy or app version may hide this feature.
@@ -40,7 +40,7 @@ In [Microsoft Foundry](https://ai.azure.com/):
 From this repository's root:
 
 ```bash
-python3 setup.py
+uv run bootstrap.py
 ```
 
 The script asks for a single deployment name (or optional per-role mappings), the two base URLs, and the Foundry key (hidden input). It then:
@@ -48,16 +48,16 @@ The script asks for a single deployment name (or optional per-role mappings), th
 1. Validates the inputs and generates a random `sk-` proxy credential if none exists.
 2. Writes private local configuration to ignored `.env` with POSIX mode `0600`.
 3. Installs a pinned Nexus CLI revision under `.local/nexus`, with lockfile-based npm dependencies and lifecycle scripts disabled.
-4. Creates `.venv` and installs the pinned LiteLLM proxy dependency.
+4. Runs `uv sync --frozen`, which installs the exact, hash-verified dependency set recorded in `uv.lock` into `.venv`.
 
-It does **not** start a server, perform inference, log in to Nexus, install Claude Code, edit shell profiles, or overwrite global Claude settings. Re-running retains existing values and the proxy key, and retries dependency installation. To change values, edit `.env` locally and rerun setup. See [the setup companion](setup.README.md) for every implementation detail, option, and security boundary.
+It does **not** start a server, perform inference, log in to Nexus, install Claude Code, edit shell profiles, or overwrite global Claude settings. Re-running retains existing values and the proxy key, and retries dependency installation. To change values, edit `.env` locally and rerun setup. See [the setup companion](bootstrap.README.md) for every implementation detail, option, and security boundary.
 
 **Nexus's role:** the CLI is installed as requested and can be run with `./nexus.sh --help`. LiteLLM, not Nexus, provides the protocol translation in this Foundry workflow. Do not run `nexus claude` or `nexus claude-desktop on` for this configuration: those commands manage a separate connection path and can replace your harness settings.
 
 For an unattended setup, copy `.env.example` to `.env`, populate its blank fields using JSON-quoted strings, and run:
 
 ```bash
-python3 setup.py --non-interactive
+uv run bootstrap.py --non-interactive
 ```
 
 Leave `LITELLM_MASTER_KEY` empty to generate one. Do not pass keys as command-line arguments. Environment variables with the documented names can also supply the inputs; these override `.env` and are persisted by setup. `.env` is a data file: **do not `source` it**.
@@ -65,7 +65,7 @@ Leave `LITELLM_MASTER_KEY` empty to generate one. Do not pass keys as command-li
 ## 3. Start LiteLLM
 
 ```bash
-python3 runtime.py start
+uv run runtime.py start
 ```
 
 Leave this terminal open. It runs in the foreground; press Ctrl+C to stop it. Only the loopback interface is bound. The host and port come from your local configuration. No database or Redis is required for this single-user reference.
@@ -77,7 +77,7 @@ For a remote/shared gateway, do not simply change the bind address. TLS, scoped 
 In a second terminal, from this repository:
 
 ```bash
-python3 smoke_test.py --allow-billable
+uv run smoke_test.py --allow-billable
 ```
 
 **This can make seven billable inference requests.** It checks rejection of an invalid proxy key (a master-key-only proxy without a database rejects unknown keys with HTTP 400, which counts as passing), model discovery, text responses and Anthropic SSE streams on all three routes, and a forced tool call on the Sonnet route. No actual tool is executed. Failed checks return a nonzero exit status; private upstream error bodies are withheld.
@@ -87,7 +87,7 @@ Expected output is a sequence of `PASS` messages ending in `Smoke tests passed`.
 Offline checks (no install or cloud credentials needed):
 
 ```bash
-python3 -m unittest discover -s tests -v
+uv run --no-project python -m unittest discover -s tests -v
 ```
 
 ## 5. Connect Claude Code
@@ -95,13 +95,13 @@ python3 -m unittest discover -s tests -v
 Keep the proxy running, then launch Claude Code through the scoped wrapper:
 
 ```bash
-python3 runtime.py claude
+uv run runtime.py claude
 ```
 
 Arguments are forwarded to Claude Code:
 
 ```bash
-python3 runtime.py claude --model claude-opus-foundry
+uv run runtime.py claude --model claude-opus-foundry
 ```
 
 The wrapper sets `ANTHROPIC_BASE_URL` to your local proxy URL and `ANTHROPIC_AUTH_TOKEN` to the **proxy key**, not the Azure key. It sets the default model and the Sonnet/Opus/Haiku aliases to the three names in `config.yaml`. Background Haiku traffic is therefore also routed to Foundry. It removes competing provider/auth environment variables in the child only and disables nonessential Claude Code traffic. It also points `CLAUDE_CONFIG_DIR` at a repo-local directory (`.local/claude-config`) so a user-level `~/.claude/settings.json` — for example a Nexus or other gateway config with its own auth headers — cannot override the proxy settings (this broke auth during live testing). A side effect: wrapped sessions don't see user-level MCP servers or settings; add any you need to `.local/claude-config/settings.json`. It does not edit or disable your existing user, project, or managed settings. Inspect those for conflicting `env` values, `apiKeyHelper`, model restrictions, and provider policies if requests route elsewhere.
@@ -132,14 +132,14 @@ The screenshots below were supplied from a macOS Claude Desktop installation on 
 4. Run this locally to view non-secret connection values:
 
    ```bash
-   python3 runtime.py desktop-values
+   uv run runtime.py desktop-values
    ```
 
 5. In **Connection**, select **Gateway** as the provider and **Static API key** as the **Credential kind**. Paste your local **Gateway base URL**, and choose **bearer** as the **Gateway auth scheme**. Do not append `/v1/messages`.
 6. To obtain the gateway key, explicitly reveal the **local proxy key** in a private terminal:
 
    ```bash
-   python3 runtime.py desktop-values --show-key
+   uv run runtime.py desktop-values --show-key
    ```
 
    Paste it into **Gateway API key**, then click **Test connection**. Never use your Foundry key here; clear any clipboard history according to your organization's policy. Do not capture this terminal or the populated key field in screenshots. The screenshot deliberately replaces both the URL and key with explanatory labels—enter your actual local values, not these labels.
@@ -165,7 +165,7 @@ To switch back, clear/disable the gateway through the same UI, apply changes, an
 
 ## Troubleshooting
 
-- **Setup fails before installation:** confirm all required fields, Python 3.11+, Node 22+, npm, and Git. Run `python3 setup.py --help`. Endpoint values must meet the shapes described above; validation intentionally does not print private values.
+- **Setup fails before installation:** confirm all required fields, uv, Node 22+, npm, and Git. Run `uv run bootstrap.py --help`. Endpoint values must meet the shapes described above; validation intentionally does not print private values.
 - **Installation failed after saving `.env`:** fix the package/network/prerequisite problem and rerun setup. Existing credentials and proxy key are retained. Never share raw installer output without review (private package-index configuration can appear in tool errors).
 - **Connection refused:** keep `runtime.py start` running; verify the configured loopback URL and port. If occupied, stop the owning service yourself or choose a different port, then reconfigure clients. Scripts never kill unrelated processes.
 - **Proxy 401/403:** use the local proxy key from `.env`, not the Foundry key. Restart LiteLLM after rotating it and update Desktop. The wrapper reads it at every launch.
@@ -174,7 +174,7 @@ To switch back, clear/disable the gateway through the same UI, apply changes, an
 - **400 / unsupported parameter:** translation does not make every Claude capability available. `drop_params` is intentionally false so unsupported behavior is visible. Determine the unsupported feature before making a targeted change; do not globally discard fields without review.
 - **429:** check Foundry quotas and deployment capacity. This reference does not configure fallback or a retry policy; dependency-level retry behavior can still apply.
 - **Tool or stream check fails:** use a deployment that supports the feature and inspect its API contract. Do not proceed to a coding-agent session until both work. Reasoning models may exhaust the test's 1,024-token output budget; adjust it deliberately and account for cost.
-- **Agentic tool turns fail with upstream `invalid_payload`:** replayed assistant thinking is being forwarded as reasoning fields. The included `reasoning_history_hook.py` normally prevents this; confirm it's registered under `litellm_settings.callbacks` and the proxy was restarted. See [setup.README.md](setup.README.md) for the trade-offs.
+- **Agentic tool turns fail with upstream `invalid_payload`:** replayed assistant thinking is being forwarded as reasoning fields. The included `reasoning_history_hook.py` normally prevents this; confirm it's registered under `litellm_settings.callbacks` and the proxy was restarted. See [bootstrap.README.md](bootstrap.README.md) for the trade-offs.
 - **Context errors:** route names do not grant Claude's context window to the underlying model. Confirm its actual limits and configure client compaction appropriately; this repo does not invent context metadata.
 - **Claude ignores the proxy:** inspect inherited/project/managed settings, provider selectors, helpers, and organization restrictions. Do not run Nexus harness commands over this configuration.
 
@@ -189,7 +189,7 @@ To switch back, clear/disable the gateway through the same UI, apply changes, an
 
 ## Documentation
 
-- [Setup implementation and detailed LiteLLM configuration](setup.README.md)
+- [Setup implementation and detailed LiteLLM configuration](bootstrap.README.md)
 - [LiteLLM: Claude Code client setup](https://docs.litellm.ai/docs/proxy/client_setup/claude_code)
 - [LiteLLM: OpenAI-compatible providers](https://docs.litellm.ai/docs/providers/openai_compatible)
 - [Claude Code: LLM gateways](https://code.claude.com/docs/en/llm-gateway)

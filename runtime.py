@@ -1,3 +1,7 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
 """Local configuration and scoped launchers; Python standard library only."""
 
 import argparse
@@ -53,7 +57,7 @@ def validate(values):
     for field in FIELDS:
         value = values.get(field, "")
         if field not in OPTIONAL_FIELDS and not value.strip():
-            raise ValueError(f"Missing {field}; run python3 setup.py")
+            raise ValueError(f"Missing {field}; run uv run bootstrap.py")
         if any(c in value for c in "\r\n\x00"):
             raise ValueError(f"Invalid control character in {field}")
     base = urlsplit(values["FOUNDRY_API_BASE"])
@@ -102,8 +106,21 @@ def proxy_environment(values):
     return env
 
 
+def without_uv_run(env):
+    """Drop the throwaway script environment `uv run` injects, so it doesn't leak into Claude."""
+    if "UV_RUN_RECURSION_DEPTH" not in env:
+        return env
+    script_env = env.pop("VIRTUAL_ENV", None)
+    if script_env:
+        script_bin = str(Path(script_env) / "bin")
+        env["PATH"] = os.pathsep.join(p for p in env.get("PATH", "").split(os.pathsep) if p != script_bin)
+    for key in ("UV", "UV_RUN_RECURSION_DEPTH"):
+        env.pop(key, None)
+    return env
+
+
 def claude_environment(values):
-    env = os.environ.copy()
+    env = without_uv_run(os.environ.copy())
     # Remove competing provider and auth selections in this child process only.
     for key in list(env):
         if key.startswith(("ANTHROPIC_", "FOUNDRY_", "LITELLM_")) or key in (
@@ -151,7 +168,7 @@ def main():
             parser.error("start does not accept extra options")
         binary = ROOT / ".venv/bin/litellm"
         if not binary.exists():
-            raise ValueError("LiteLLM not installed; run python3 setup.py")
+            raise ValueError("LiteLLM not installed; run uv run bootstrap.py")
         port = urlsplit(values["LITELLM_PROXY_BASE_URL"]).port
         return run_child([str(binary), "--config", str(ROOT / "config.yaml"),
                           "--host", "127.0.0.1", "--port", str(port)], proxy_environment(values))

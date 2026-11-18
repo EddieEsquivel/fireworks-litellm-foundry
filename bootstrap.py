@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Interactive bootstrap, not a setuptools package. See setup.README.md."""
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""Interactive bootstrap for this repo. See bootstrap.README.md."""
 
 import argparse
 import getpass
@@ -49,7 +53,7 @@ def collect_values(non_interactive):
 def install_nexus():
     for binary in ("node", "npm", "git"):
         if not shutil.which(binary):
-            raise ValueError(f"Install {binary} first; see setup.README.md")
+            raise ValueError(f"Install {binary} first; see bootstrap.README.md")
     major = subprocess.check_output(["node", "-p", "process.versions.node.split('.')[0]"], text=True).strip()
     if int(major) < 22:
         raise ValueError("Node.js 22+ required for Nexus")
@@ -67,11 +71,19 @@ def install_nexus():
 
 
 def install_litellm():
+    uv = shutil.which("uv")
+    if uv:
+        # Install exactly what uv.lock records into .venv. VIRTUAL_ENV may point at
+        # the ephemeral environment `uv run` created for this script; drop it.
+        env = {key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"}
+        subprocess.run([uv, "sync", "--frozen"], cwd=ROOT, env=env, check=True)
+        return
+    # Fallback without uv: requirements.txt is exported from uv.lock with hashes.
     environment = ROOT / ".venv"
     if not environment.exists():
         venv.EnvBuilder(with_pip=True).create(environment)
-    subprocess.run([str(environment / "bin/python"), "-m", "pip", "install", "--requirement",
-                    str(ROOT / "requirements.txt")], check=True)
+    subprocess.run([str(environment / "bin/python"), "-m", "pip", "install", "--require-hashes",
+                    "--requirement", str(ROOT / "requirements.txt")], check=True)
 
 
 def main():
@@ -87,15 +99,15 @@ def main():
     os.umask(0o077)
     values = collect_values(args.non_interactive)
     write_private(ENV_FILE, "# Local secrets; JSON-quoted literal values. Do not source or share.\n" +
-                  "".join(f"{field}={json.dumps(values.get(field, ""))}\n" for field in FIELDS))
+                  "".join(f"{field}={json.dumps(values.get(field, ''))}\n" for field in FIELDS))
     if not args.configure_only:
         if not args.skip_nexus:
             install_nexus()
         install_litellm()
     print("Local configuration saved privately to .env; credentials were not printed.")
-    print("Start: python3 runtime.py start")
-    print("Verify (billable): python3 smoke_test.py --allow-billable")
-    print("Launch Claude Code: python3 runtime.py claude")
+    print("Start: uv run runtime.py start")
+    print("Verify (billable): uv run smoke_test.py --allow-billable")
+    print("Launch Claude Code: uv run runtime.py claude")
     print("Local Nexus: ./nexus.sh --help (does not configure this proxy)")
     return 0
 
@@ -104,7 +116,7 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except (ValueError, OSError, subprocess.CalledProcessError):
-        print("Setup failed. Check required inputs, prerequisites, and dependency installer output; see setup.README.md.", file=sys.stderr)
+        print("Setup failed. Check required inputs, prerequisites, and dependency installer output; see bootstrap.README.md.", file=sys.stderr)
         sys.exit(1)
     except (KeyboardInterrupt, EOFError):
         print("Setup cancelled.", file=sys.stderr)

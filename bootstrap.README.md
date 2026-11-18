@@ -1,6 +1,20 @@
-# `setup.py`: implementation and LiteLLM configuration reference
+# `bootstrap.py`: implementation and LiteLLM configuration reference
 
-This document is the companion to [`setup.py`](setup.py). For the user journey, start with [README.md](README.md). `setup.py` is an executable bootstrap utility, **not** a setuptools packaging entry point. Do not run `pip install .` or `python setup.py install`.
+This document is the companion to [`bootstrap.py`](bootstrap.py). For the user journey, start with [README.md](README.md). The repository is a uv project of scripts, not an installable package (`[tool.uv] package = false`). Do not run `pip install .`.
+
+## uv project layout (2026-11-17)
+
+The repository is managed with [uv](https://docs.astral.sh/uv/):
+
+- `pyproject.toml` declares the one direct dependency, `litellm[proxy]==1.106.4`, and `requires-python = ">=3.11"`.
+- `uv.lock` pins every transitive dependency with its hashes. Commit it whenever dependencies change.
+- `.python-version` selects Python 3.12. uv downloads it if it isn't installed.
+- `requirements.txt` is generated from `uv.lock`, with hashes, for installs without uv. Do not edit it by hand.
+- `bootstrap.py` (formerly `setup.py`), `runtime.py`, and `smoke_test.py` use only the standard library and carry inline script metadata (`# /// script`). `uv run <script>.py` therefore runs them in a dependency-free environment and does **not** install the project first. In particular, `bootstrap.py --configure-only` still downloads nothing.
+- The LiteLLM proxy runs from `.venv`, which `uv sync` creates. `runtime.py start` launches `.venv/bin/litellm` directly.
+- When launched via `uv run`, `runtime.py claude` removes uv's script environment (`VIRTUAL_ENV`, its `PATH` entry, `UV_RUN_RECURSION_DEPTH`) from the Claude Code child, so wrapped sessions see the same `python` as your shell.
+
+Previously `setup.py` used a double-quoted string inside a double-quoted f-string, which Python accepts only from 3.12. On 3.11 or older it failed with a `SyntaxError` before its own version check could run. That line is fixed, so 3.11 now actually works and older versions get the intended clear error.
 
 ## Single-model override and Desktop wildcard routing (2026-10-29)
 
@@ -12,18 +26,18 @@ Restart LiteLLM after changing `.env`. Existing environment-variable overrides s
 
 ## Scope and prerequisites
 
-The goal is a single-user local integration between an Anthropic Messages client and Fireworks deployments billed through Microsoft Foundry. The script requires Python 3.11+ on POSIX (macOS, Linux, or WSL). A normal full setup also requires Node.js 22+, npm, Git, internet access to GitHub/npm/PyPI, and Python's venv/pip support. It does not install system prerequisites, request administrator access, configure Azure resources, or install Claude Code/Desktop.
+The goal is a single-user local integration between an Anthropic Messages client and Fireworks deployments billed through Microsoft Foundry. The scripts require Python 3.11+ on POSIX (macOS, Linux, or WSL); `uv run` supplies a suitable interpreter. A normal full setup also requires uv, Node.js 22+, npm, Git, and internet access to GitHub/npm/PyPI. It does not install system prerequisites, request administrator access, configure Azure resources, or install Claude Code/Desktop.
 
-All Python setup/runtime utilities use the standard library; LiteLLM itself is installed into an isolated virtual environment. The scripts resolve file paths from their own location rather than assuming the current shell directory.
+All Python setup/runtime utilities use the standard library; LiteLLM itself is installed into the project's `.venv` by uv. The scripts resolve file paths from their own location rather than assuming the current shell directory.
 
 ## Invocation and flags
 
 ```bash
-python3 setup.py
-python3 setup.py --non-interactive
-python3 setup.py --configure-only
-python3 setup.py --skip-nexus
-python3 setup.py --help
+uv run bootstrap.py
+uv run bootstrap.py --non-interactive
+uv run bootstrap.py --configure-only
+uv run bootstrap.py --skip-nexus
+uv run bootstrap.py --help
 ```
 
 - **Default:** collect configuration, save it, install repo-local Nexus, and install LiteLLM. Missing values prompt; the Foundry key uses `getpass` so terminal echo is disabled.
@@ -92,11 +106,15 @@ If `.local/nexus` already exists, setup checks its origin string and re-checks o
 
 ### 7. Install LiteLLM into `.venv`
 
-If absent, Python creates `.venv` with pip. Setup then invokes that environment's Python with `-m pip install --requirement requirements.txt`. The direct dependency is `litellm[proxy]==1.106.4`.
+Setup runs `uv sync --frozen` in the repository root. uv creates `.venv` if needed and installs exactly the packages and hashes recorded in `uv.lock`; `--frozen` means it never re-resolves or updates the lock. The direct dependency is `litellm[proxy]==1.106.4`. The `proxy` extra installs server dependencies required for the `litellm` console command. Nothing is installed globally.
 
-The `proxy` extra installs server dependencies required for the `litellm` console command. No global pip installation is performed. This is a direct-version pin, **not** a hash-locked transitive dependency set or a security certification. Review upstream release notes, package provenance, dependency advisories, and your organization's approved package mirror before deploying. Rerunning setup can resolve different transitive versions if they are not already installed. There is no implicit `pip --upgrade` to a floating LiteLLM release.
+The whole dependency tree is therefore reproducible and hash-verified. That is not a security certification: review upstream release notes, package provenance, dependency advisories, and your organization's approved package mirror (`UV_INDEX_URL` / `UV_DEFAULT_INDEX`) before deploying.
 
-The install subprocess streams normal package output. Private package-index URLs from your own pip/npm/Git environment may appear in installer diagnostics; do not publish raw logs without review. Failed dependency installation does not undo the already-saved `.env`. Rerun after fixing the prerequisite/network issue.
+#### Installing without uv
+
+If `uv` is not on PATH, setup falls back to the interpreter running it: it creates `.venv` with that Python and runs `pip install --require-hashes --requirement requirements.txt`. That file is exported from `uv.lock` and contains the same versions and hashes. Run setup with Python 3.11+ (`python3 bootstrap.py`), and replace `uv run X.py` with `python3 X.py` in the other commands.
+
+The install subprocess streams normal package output. Private package-index URLs from your own uv/pip/npm/Git environment may appear in installer diagnostics; do not publish raw logs without review. Failed dependency installation does not undo the already-saved `.env`. Rerun after fixing the prerequisite/network issue.
 
 ## LiteLLM configuration: every decision
 
@@ -204,7 +222,7 @@ Reference: [Claude Code model aliases](https://code.claude.com/docs/en/model-con
 ### Offline checks
 
 ```bash
-python3 -m unittest discover -s tests -v
+uv run --no-project python -m unittest discover -s tests -v
 ```
 
 These validate inert configuration parsing, URL validation, secret-file permissions, provider model construction, client environment scoping, setup rerun behavior, and smoke-test assertions using synthetic local data/mocks. They do not need or read another project's secrets.
@@ -224,7 +242,7 @@ This initial check established local installation/configuration only. Subsequent
 ### Live smoke checks
 
 ```bash
-python3 smoke_test.py --allow-billable
+uv run smoke_test.py --allow-billable
 ```
 
 The mandatory flag records explicit consent to seven potential inference requests. First the script checks `/v1/models` rejects a bad credential, then verifies all three routes exist with the correct credential. It sends one ordinary message and one stream per route, then a forced tool-call request on Sonnet. It validates Anthropic response blocks and stream events, without printing generated text or executing a tool. Timeouts are 180 seconds per request. It does not retry at the script level; SDK/provider layers may have their own policies.
@@ -252,8 +270,15 @@ On October 29, 2026, the user supplied five authentic macOS Desktop screenshots 
 
 - **Rotate Azure key:** replace `FOUNDRY_API_KEY` in `.env` or the injected environment, then restart the proxy. The local proxy key can stay the same.
 - **Rotate proxy key:** empty `LITELLM_MASTER_KEY` and rerun setup with `--configure-only` to generate a fresh value; restart the proxy, relaunch wrapped Claude Code, and update Desktop's stored key. An environment override will take precedence over an edited file.
-- **Change deployment/base/port:** edit local configuration, validate via `setup.py --configure-only`, restart the proxy, rerun billable smoke checks deliberately, and update Desktop's URL if necessary.
-- **Upgrade LiteLLM:** deliberately change the version in `requirements.txt`, review release notes/advisories, rerun setup, and rerun offline plus live client checks. A direct pin is not a full reproducible environment.
+- **Change deployment/base/port:** edit local configuration, validate via `bootstrap.py --configure-only`, restart the proxy, rerun billable smoke checks deliberately, and update Desktop's URL if necessary.
+- **Upgrade LiteLLM:** deliberately change the version in `pyproject.toml`, review release notes/advisories, then regenerate the lock and the pip fallback:
+
+  ```bash
+  uv lock
+  uv export --frozen --no-emit-project --no-dev --format requirements-txt -o requirements.txt
+  ```
+
+  Review the `uv.lock` diff, rerun setup, and rerun offline plus live client checks.
 - **Upgrade Nexus:** deliberately update `NEXUS_REVISION`, review the revision and lockfile, rerun setup, and validate `nexus.sh --help`. Do not use a moving revision in a customer release without review.
 - **Remove:** stop the proxy and wrapped clients; disable the Desktop gateway through its UI. Delete local `.env`, `.venv`, and `.local` using your normal filesystem tools. The repo-local install did not change shell profiles or Claude settings; separately invoked Nexus commands may have their own cleanup requirements. Revoke any exposed Azure credentials in Azure rather than relying on file deletion.
 
